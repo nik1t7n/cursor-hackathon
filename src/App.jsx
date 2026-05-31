@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Volume2, VolumeX, Share2, Copy, Sparkles, AlertCircle, ShoppingBag, BarChart3, X } from 'lucide-react';
+import { Volume2, VolumeX, Music, Share2, Copy, Sparkles, AlertCircle, ShoppingBag, BarChart3, X } from 'lucide-react';
 import { useGame } from './useGame';
 import { 
   BloodCoinSVG, 
@@ -16,6 +16,7 @@ export default function App() {
     biteMarks,
     floatingTexts,
     isMuted,
+    isMusicMuted,
     upgrades,
     bloodPerClick,
     bloodPerSecond,
@@ -28,6 +29,7 @@ export default function App() {
     handleBite,
     buyUpgrade,
     toggleMute,
+    toggleMusicMute,
     handleJakeClick,
     getShareText,
     initAudio
@@ -79,8 +81,9 @@ export default function App() {
   const passiveSwarmLevel = upgrades.find(u => u.id === 'mosquitoes')?.level || 0;
 
   useEffect(() => {
-    const count = Math.min(20, passiveSwarmLevel * 2);
-    const initialMosquitoes = Array.from({ length: count }).map((_, idx) => ({
+    // Start with 20 base mosquitoes, and add 8 per Swarm Level, capped at 100 max for a real massive visual swarm!
+    const count = 20 + passiveSwarmLevel * 8;
+    const initialMosquitoes = Array.from({ length: Math.min(100, count) }).map((_, idx) => ({
       id: idx,
       x: Math.random() * 90 + 5,
       y: Math.random() * 90 + 5,
@@ -400,6 +403,19 @@ export default function App() {
           {/* Vertical Separator */}
           <div className="w-[1.5px] h-6 bg-[#18181b]/10 self-center" />
 
+          {/* Music Toggle Action Tab */}
+          <button
+            onClick={toggleMusicMute}
+            className={`p-2.5 rounded-2xl transition-all active-hover-scale ${
+              isMusicMuted 
+                ? 'bg-amber-50 text-amber-600 border border-amber-200' 
+                : 'bg-zinc-100 text-amber-500 border border-zinc-200 hover:bg-zinc-200/50'
+            }`}
+            title="Toggle Background Music"
+          >
+            <Music className="w-4 h-4" />
+          </button>
+
           {/* Sound Toggle Action Tab */}
           <button
             onClick={toggleMute}
@@ -408,6 +424,7 @@ export default function App() {
                 ? 'bg-rose-50 text-rose-600 border border-rose-200' 
                 : 'bg-zinc-100 text-sky-600 border border-zinc-200 hover:bg-zinc-200/50'
             }`}
+            title="Toggle Sound Effects"
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>

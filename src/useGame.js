@@ -26,18 +26,30 @@ export function useGame() {
     return saved === 'true';
   });
 
+  const [isMusicMuted, setIsMusicMuted] = useState(() => {
+    const saved = localStorage.getItem('mq_isMusicMuted');
+    return saved === 'true';
+  });
+
   // --- Upgrades State ---
   const [upgrades, setUpgrades] = useState(() => {
     const saved = localStorage.getItem('mq_upgrades');
     if (saved) {
-      try { return JSON.parse(saved); } catch(e) {}
+      try {
+        const parsed = JSON.parse(saved);
+        // If it is the old list (less than 6 items or missing Adventure Time upgrades), ignore and reload!
+        if (parsed.length === 6 && parsed.some(p => p.id === 'demon_sword')) {
+          return parsed;
+        }
+      } catch(e) {}
     }
     return [
-      { id: 'mosquitoes', name: 'More Mosquitoes', desc: 'Recruit wild mosquitoes to buzz and bite passively.', level: 0, cost: 15, baseCost: 15, multiplier: 1.5, cps: 1, cpc: 0, icon: '🦟' },
-      { id: 'proboscis', name: 'Needle Proboscis', desc: 'Sharpen your tool to draw more blood per tap.', level: 0, cost: 50, baseCost: 50, multiplier: 1.6, cps: 0, cpc: 1, icon: '💉' },
-      { id: 'ankle_bite', name: 'Ankle Strike', desc: 'Strike sneaky ankle spots. Great passive gain.', level: 0, cost: 120, baseCost: 120, multiplier: 1.7, cps: 5, cpc: 0, icon: '🦵' },
-      { id: 'open_window', name: 'Open Window', desc: 'Invite the entire swarm into a camper bedroom.', level: 0, cost: 350, baseCost: 350, multiplier: 1.8, cps: 20, cpc: 0, icon: '🪟' },
-      { id: 'camping_raid', name: 'Camping Raid', desc: 'Invade a beach barbecue with tactical operations.', level: 0, cost: 1000, baseCost: 1000, multiplier: 1.9, cps: 0, cpc: 15, icon: '⛺' }
+      { id: 'mosquitoes', name: 'Ooo Swarm Recruit', desc: 'Recruit wild Ooo mosquitoes to buzz and bite passively.', level: 0, cost: 15, baseCost: 15, multiplier: 1.5, cps: 1, cpc: 0, icon: '🦟' },
+      { id: 'jake_needle', name: "Jake's Tooth Needle", desc: "Use Jake's shape-shifted sharp teeth to draw more blood per tap.", level: 0, cost: 50, baseCost: 50, multiplier: 1.6, cps: 0, cpc: 2, icon: '🐕' },
+      { id: 'finn_backpack', name: "Finn's Backpack Kit", desc: 'Pack extra Ooo travel supplies to attract passive mosquito allies.', level: 0, cost: 120, baseCost: 120, multiplier: 1.7, cps: 5, cpc: 0, icon: '🎒' },
+      { id: 'bubblegum_jelly', name: 'Royal Bubblegum Jelly', desc: "Princess Bubblegum's sweet royal jelly that increases click strength.", level: 0, cost: 350, baseCost: 350, multiplier: 1.8, cps: 0, cpc: 12, icon: '👑' },
+      { id: 'marceline_bass', name: "Marceline's Bass", desc: "Play Marcy's rock bass chords to whip the swarm into a passive frenzy.", level: 0, cost: 1000, baseCost: 1000, multiplier: 1.9, cps: 35, cpc: 0, icon: '🎸' },
+      { id: 'demon_sword', name: 'Demon Blood Sword', desc: "Shatter heavy defenses with Finn's red demon sword to draw massive blood.", level: 0, cost: 3000, baseCost: 3000, multiplier: 2.0, cps: 0, cpc: 75, icon: '🗡️' }
     ];
   });
 
@@ -55,9 +67,7 @@ export function useGame() {
 
   // --- Audio Synthesis Engine (Ref-based with premium wav assets) ---
   const audioCtxRef = useRef(null);
-  const buzzOscRef = useRef(null);
-  const buzzGainRef = useRef(null);
-  const lfoRef = useRef(null);
+  const bgMusicRef = useRef(null);
   const audioBuffersRef = useRef({});
 
   // Persist core progress in localStorage
@@ -65,8 +75,46 @@ export function useGame() {
     localStorage.setItem('mq_bloodCoins', bloodCoins.toString());
     localStorage.setItem('mq_biteCount', biteCount.toString());
     localStorage.setItem('mq_isMuted', isMuted.toString());
+    localStorage.setItem('mq_isMusicMuted', isMusicMuted.toString());
     localStorage.setItem('mq_upgrades', JSON.stringify(upgrades));
-  }, [bloodCoins, biteCount, isMuted, upgrades]);
+  }, [bloodCoins, biteCount, isMuted, isMusicMuted, upgrades]);
+
+  // Initialize background music
+  useEffect(() => {
+    const audio = new Audio('/sounds/bg_music.mp3');
+    audio.loop = true;
+    audio.volume = 0.25; // elegant volume level
+    bgMusicRef.current = audio;
+
+    return () => {
+      if (bgMusicRef.current) {
+        bgMusicRef.current.pause();
+        bgMusicRef.current = null;
+      }
+    };
+  }, []);
+
+  const startMusic = () => {
+    if (isMusicMuted || !bgMusicRef.current) return;
+    bgMusicRef.current.play().catch(err => {
+      console.log("Autoplay prevented, will play on interaction:", err);
+    });
+  };
+
+  const stopMusic = () => {
+    if (bgMusicRef.current) {
+      bgMusicRef.current.pause();
+    }
+  };
+
+  // Sync background music state when mute is toggled
+  useEffect(() => {
+    if (isMusicMuted) {
+      stopMusic();
+    } else {
+      startMusic();
+    }
+  }, [isMusicMuted]);
 
   // Pre-load audio data into Web Audio API buffers for zero-latency gameplay
   const preloadSound = async (name, url) => {
@@ -93,6 +141,10 @@ export function useGame() {
     }
     if (audioCtxRef.current.state === 'suspended') {
       audioCtxRef.current.resume();
+    }
+    // Also trigger background music start upon first interaction if not muted
+    if (!isMusicMuted && bgMusicRef.current && bgMusicRef.current.paused) {
+      startMusic();
     }
   };
 
@@ -122,82 +174,6 @@ export function useGame() {
       const audio = new Audio(`/sounds/${name}.wav`);
       audio.volume = volume;
       audio.play().catch(() => {});
-    }
-  };
-
-  // Start continuous, annoying flight buzz
-  const startBuzz = () => {
-    initAudio();
-    if (isMuted || buzzOscRef.current) return;
-
-    const ctx = audioCtxRef.current;
-    
-    // Main flight buzz oscillator (Triangle is perfect for mosquitoes!)
-    const osc = ctx.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(260, ctx.currentTime); // Low annoying frequency (roughly C4)
-
-    // Gain node for general flight volume (quiet by default)
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.04, ctx.currentTime);
-
-    // Filter to suppress high frequencies and make it sound confined
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(1200, ctx.currentTime);
-
-    // LFO for flight vibrato (makes it feel alive and shivering)
-    const lfo = ctx.createOscillator();
-    lfo.type = 'sine';
-    lfo.frequency.setValueAtTime(8, ctx.currentTime); // 8Hz modulation rate
-
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.setValueAtTime(15, ctx.currentTime); // 15Hz frequency pitch swing
-
-    lfo.connect(lfoGain);
-    lfoGain.connect(osc.frequency);
-    
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-
-    lfo.start();
-    osc.start();
-
-    buzzOscRef.current = osc;
-    buzzGainRef.current = gain;
-    lfoRef.current = lfo;
-  };
-
-  const stopBuzz = () => {
-    if (buzzOscRef.current) {
-      try {
-        buzzOscRef.current.stop();
-        lfoRef.current.stop();
-        buzzOscRef.current.disconnect();
-        lfoRef.current.disconnect();
-      } catch (e) {}
-      buzzOscRef.current = null;
-      buzzGainRef.current = null;
-      lfoRef.current = null;
-    }
-  };
-
-  // Manage flight buzz active state depending on focus, mute
-  useEffect(() => {
-    if (!isMuted) {
-      startBuzz();
-    } else {
-      stopBuzz();
-    }
-    return () => stopBuzz();
-  }, [isMuted]);
-
-  // Adjust pitch slightly when user goes to options or upgrades to keep audio reactive
-  const modulateBuzz = (freqBoost) => {
-    if (buzzOscRef.current && audioCtxRef.current) {
-      const ctx = audioCtxRef.current;
-      buzzOscRef.current.frequency.exponentialRampToValueAtTime(260 + freqBoost, ctx.currentTime + 0.2);
     }
   };
 
@@ -287,16 +263,22 @@ export function useGame() {
 
     setBloodCoins(prev => prev - upgrade.cost);
     setUpgrades(updatedUpgrades);
-    
-    // Annoyance buzz pitch sweep upward slightly to reflect faster pest count
-    modulateBuzz(newLevel * 2);
   };
 
-  // Mute audio handler
+  // Mute sound effects handler
   const toggleMute = () => {
-    setIsMuted(prev => {
+    setIsMuted(prev => !prev);
+  };
+
+  // Mute background music handler
+  const toggleMusicMute = () => {
+    setIsMusicMuted(prev => {
       const next = !prev;
-      if (next) stopBuzz();
+      if (next) {
+        stopMusic();
+      } else {
+        startMusic();
+      }
       return next;
     });
   };
@@ -425,7 +407,7 @@ export function useGame() {
       `I ruined ${biteCount.toLocaleString()} summer vacations as an annoying pest!\n` +
       `💰 Wealth: ${bloodCoins.toLocaleString()} Blood Coins\n` +
       `⚡ Passive Swarm: ${bloodPerSecond.toLocaleString()} blood/sec\n` +
-      `Ankle biting index: ${upgrades.find(u => u.id === 'ankle_bite')?.level || 0} hits.\n` +
+      `Jake's Needle Level: ${upgrades.find(u => u.id === 'jake_needle')?.level || 0}\n` +
       `Join me in slacking off and biting tourists! ⛺`;
     return text;
   };
@@ -436,6 +418,7 @@ export function useGame() {
     biteMarks,
     floatingTexts,
     isMuted,
+    isMusicMuted,
     upgrades,
     bloodPerClick,
     bloodPerSecond,
@@ -448,6 +431,7 @@ export function useGame() {
     handleBite,
     buyUpgrade,
     toggleMute,
+    toggleMusicMute,
     handleJakeClick,
     getShareText,
     initAudio
