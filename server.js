@@ -66,5 +66,12 @@ app.get("/api/leaderboard", (_req, res) => {
   res.json(top);
 });
 
+// Serve production build — all non-API routes → index.html
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+app.use(express.static(join(__dirname, "dist")));
+app.get("/{*path}", (_req, res) => res.sendFile(join(__dirname, "dist", "index.html")));
+
 const PORT = 8080;
 app.listen(PORT, () => console.log(`🦟 Game server → http://localhost:${PORT}`));

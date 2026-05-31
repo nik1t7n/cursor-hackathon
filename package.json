@@ -8,7 +8,8 @@
     "server": "node server.js",
     "bot": "node bot.js",
     "tunnel": "cloudflared tunnel --config .cloudflared/config.yml run",
-    "start": "concurrently -k -n vite,server,bot,tunnel -c cyan,green,yellow,magenta \"npm:dev\" \"npm:server\" \"npm:bot\" \"npm:tunnel\""
+    "start": "concurrently -k -n vite,server,bot,tunnel -c cyan,green,yellow,magenta \"npm:dev\" \"npm:server\" \"npm:bot\" \"npm:tunnel\"",
+    "start:prod": "concurrently -k -n server,bot,tunnel -c green,yellow,magenta \"npm:server\" \"npm:bot\" \"npm:tunnel\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

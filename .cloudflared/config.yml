@@ -6,5 +6,5 @@ originRequest:
 
 ingress:
   - hostname: dev-mt.mrz.sh
-    service: http://localhost:5173
+    service: http://localhost:8080
   - service: http_status:404
