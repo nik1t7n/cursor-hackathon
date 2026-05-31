@@ -1,0 +1,23 @@
+{
+  "name": "mosquito-tycoon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server.js",
+    "bot": "node bot.js",
+    "tunnel": "cloudflared tunnel --config .cloudflared/config.yml run",
+    "start": "concurrently -k -n vite,server,bot,tunnel -c cyan,green,yellow,magenta \"npm:dev\" \"npm:server\" \"npm:bot\" \"npm:tunnel\""
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "vite": "^6.0.7"
+  }
+}

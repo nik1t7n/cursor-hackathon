@@ -1,0 +1,10 @@
+tunnel: dev-mt
+credentials-file: .cloudflared/creds.json
+
+originRequest:
+  httpHostHeader: localhost
+
+ingress:
+  - hostname: dev-mt.mrz.sh
+    service: http://localhost:5173
+  - service: http_status:404
