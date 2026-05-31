@@ -232,9 +232,6 @@ export default function App() {
                     <span className="block px-2.5 py-0.5 text-[10px] bg-[#18181b] border border-[#18181b] rounded text-white font-black tracking-widest uppercase">
                       {item.text}
                     </span>
-                    <span className="block text-[10px] font-black text-[#e11d48] mt-0.5">
-                      +{item.amount} BLOOD
-                    </span>
                   </motion.div>
                 ))}
               </AnimatePresence>
