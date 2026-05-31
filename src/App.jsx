@@ -82,9 +82,9 @@ export default function App() {
   const passiveSwarmLevel = upgrades.find(u => u.id === 'mosquitoes')?.level || 0;
 
   useEffect(() => {
-    // Start with 20 base mosquitoes, and add 8 per Swarm Level, capped at 100 max for a real massive visual swarm!
-    const count = 20 + passiveSwarmLevel * 8;
-    const initialMosquitoes = Array.from({ length: Math.min(100, count) }).map((_, idx) => ({
+    // Start with 8 base mosquitoes, and add 4 per Swarm Level, capped at 45 max for a balanced visual swarm!
+    const count = 8 + passiveSwarmLevel * 4;
+    const initialMosquitoes = Array.from({ length: Math.min(45, count) }).map((_, idx) => ({
       id: idx,
       x: Math.random() * 90 + 5,
       y: Math.random() * 90 + 5,
