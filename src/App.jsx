@@ -51,6 +51,7 @@ export default function App() {
   } = useGame();
 
   const canvasRef = useRef(null);
+  const lastTapRef = useRef(0);
   const [mousePos, setMousePos] = useState({ x: 150, y: 150 });
   const [isBiting, setIsBiting] = useState(false);
   const [jakeBounceType, setJakeBounceType] = useState(null);
@@ -87,6 +88,7 @@ export default function App() {
 
   const handleCanvasClick = (e) => {
     e.preventDefault();
+    lastTapRef.current = Date.now();
     setHasInteracted(true);
     initAudio();
     setIsBiting(true);
@@ -126,7 +128,8 @@ export default function App() {
     if (ambientMosquitoes.length === 0) return;
 
     const interval = setInterval(() => {
-      setAmbientMosquitoes(prev => 
+      if (Date.now() - lastTapRef.current < 300) return; // pause during tap burst
+      setAmbientMosquitoes(prev =>
         prev.map(m => {
           // Organic steering force adjustments (random walking)
           let nSpeedX = m.speedX + (Math.random() - 0.5) * 0.25;

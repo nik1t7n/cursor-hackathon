@@ -241,12 +241,15 @@ export function useGame() {
       text: phrase,
       amount: bloodPerClick
     };
-    setFloatingTexts(prev => [...prev, newText]);
+    setFloatingTexts(prev => {
+      if (prev.length >= 5) return prev; // skip when too many in flight
+      return [...prev, newText];
+    });
 
-    // Cleanup floating text after 1s
+    // Cleanup floating text after 500ms (was 1000ms)
     setTimeout(() => {
       setFloatingTexts(prev => prev.filter(t => t.id !== newText.id));
-    }, 1000);
+    }, 500);
 
     // Update state values
     setBloodCoins(prev => prev + bloodPerClick);
