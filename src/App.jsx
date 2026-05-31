@@ -57,8 +57,20 @@ export default function App() {
   // Navigation sheet management states
   const [activeSheet, setActiveSheet] = useState(null); // 'shop' or 'stats' or null
 
-  // Init Telegram fullscreen on mount
-  useEffect(() => { initTelegram(); }, []);
+  // Safe area insets (Telegram fullscreen overlays its chrome on top)
+  const [safeTop, setSafeTop] = useState(0);
+  useEffect(() => {
+    initTelegram();
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+    const update = () => {
+      const top = (tg.contentSafeAreaInset?.top ?? 0) + (tg.safeAreaInset?.top ?? 0);
+      setSafeTop(top);
+    };
+    update();
+    tg.onEvent?.('safeAreaChanged', update);
+    tg.onEvent?.('contentSafeAreaChanged', update);
+  }, []);
 
   // Track coordinates of the cursor over the bite area
   const handleMouseMove = (e) => {
@@ -167,7 +179,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-between bg-[#fafafa] overflow-hidden select-none font-sans text-zinc-900 p-4 box-border">
+    <div className="relative w-full h-full flex flex-col items-center justify-between bg-[#fafafa] overflow-hidden select-none font-sans text-zinc-900 px-4 pb-4 box-border" style={{ paddingTop: safeTop > 0 ? safeTop : 16 }}>
       
 
 
