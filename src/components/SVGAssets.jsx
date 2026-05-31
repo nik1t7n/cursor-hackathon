@@ -151,7 +151,7 @@ export function FinnTarget({ children, onClick, isBiting, biteCount }) {
       <motion.img 
         src="/finn_pixel-removebg-preview.png"
         alt="Finn from Adventure Time"
-        className="w-72 h-72 md:w-80 md:h-80 object-contain select-none"
+        className="w-80 h-80 md:w-96 md:h-96 object-contain select-none"
         style={{ filter: "drop-shadow(0 15px 30px rgba(24, 24, 27, 0.18))" }}
         animate={
           bounceType === 'super' ? {

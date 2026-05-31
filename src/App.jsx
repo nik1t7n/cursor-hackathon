@@ -38,6 +38,7 @@ export default function App() {
   const canvasRef = useRef(null);
   const [mousePos, setMousePos] = useState({ x: 150, y: 150 });
   const [isBiting, setIsBiting] = useState(false);
+  const [jakeBounceType, setJakeBounceType] = useState(null);
   const [showShareToast, setShowShareToast] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
   
@@ -290,6 +291,15 @@ export default function App() {
                 style={{ originX: 1, originY: 0.5 }}
                 onClick={(e) => {
                   e.stopPropagation(); // Avoid triggering Finn target clicks
+                  if (eventOutcome) return;
+
+                  // Snappy dual-mode wobble bounce triggers
+                  const isSuper = (jakeClicks + 1) % 4 === 0;
+                  setJakeBounceType(isSuper ? 'super' : 'normal');
+
+                  const timeoutDuration = isSuper ? 650 : 250;
+                  setTimeout(() => setJakeBounceType(null), timeoutDuration);
+
                   handleJakeClick(e.clientX, e.clientY, canvasRef);
                 }}
               >
@@ -301,12 +311,34 @@ export default function App() {
                 )}
 
                 {/* Jake Pixel Art Sprite */}
-                <div className="relative group active:scale-95 transition-transform">
-                  <img 
+                <div className="relative group transition-transform">
+                  <motion.img 
                     src={rareTarget === 'jake' ? '/jake.png' : '/she.png'} 
                     alt={rareTarget === 'jake' ? "Jake the Dog pixel art" : "Adventure Time character pixel art"} 
-                    className="w-40 h-40 md:w-48 md:h-48 object-contain filter drop-shadow(0 10px 20px rgba(0,0,0,0.18))"
+                    className="w-40 h-40 md:w-48 md:h-48 object-contain filter drop-shadow(0 10px 20px rgba(0,0,0,0.18)) select-none"
                     style={{ imageRendering: 'pixelated' }}
+                    animate={
+                      jakeBounceType === 'super' ? {
+                        y: [0, 8, -36, 6, -20, 4, -8, 0],
+                        scaleY: [1, 0.7, 1.3, 0.8, 1.15, 0.9, 1.05, 1],
+                        scaleX: [1, 1.3, 0.7, 1.2, 0.85, 1.1, 0.95, 1],
+                        rotate: [0, -6, 6, -4, 4, -2, 0]
+                      } : jakeBounceType === 'normal' ? {
+                        y: [0, 4, -10, 2, 0],
+                        scaleY: [1, 0.85, 1.1, 0.95, 1],
+                        scaleX: [1, 1.15, 0.9, 1.05, 1],
+                        rotate: [0, -3, 3, 0]
+                      } : {
+                        y: 0,
+                        scaleY: 1,
+                        scaleX: 1,
+                        rotate: 0
+                      }
+                    }
+                    transition={{
+                      duration: jakeBounceType === 'super' ? 0.65 : 0.25,
+                      ease: "easeInOut"
+                    }}
                   />
 
                   {/* Tap prompt dashed spinner */}
