@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #fafafa; /* Elegant Gallery Off-White */
+    font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+    color: #18181b; /* Charcoal text */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+/* Custom premium visual styles for the minimalist layout */
+.gallery-panel {
+  background: #ffffff;
+  border: 2.5px solid #18181b; /* Clean solid border */
+  box-shadow: 6px 6px 0px #18181b; /* Retro pop-art thick shadow */
+}
+
+.minimal-dock {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 2px solid #18181b;
+  box-shadow: 0px 8px 30px rgba(0, 0, 0, 0.08);
+}
+
+.bottom-sheet {
+  background: #ffffff;
+  border-top: 3px solid #18181b;
+  box-shadow: 0px -10px 40px rgba(0, 0, 0, 0.05);
+}
+
+/* Custom scrollbars for the shop sheet */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e4e4e7;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4d4d8;
+}
+
+/* Elegant micro animations for interactive states */
+.active-hover-scale {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.active-hover-scale:hover {
+  transform: translateY(-2px);
+}
+.active-hover-scale:active {
+  transform: translateY(1px) scale(0.98);
+}
