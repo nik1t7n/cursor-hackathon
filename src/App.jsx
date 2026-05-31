@@ -9,6 +9,21 @@ import {
   FinnTarget 
 } from './components/SVGAssets';
 
+// Init Telegram Mini App — fullscreen, no swipe-to-close, colors
+function initTelegram() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) return;
+  tg.ready();
+  tg.expand();
+  if (tg.isVersionAtLeast?.('8.0')) {
+    tg.requestFullscreen?.();
+    tg.disableVerticalSwipes?.();
+  }
+  tg.setHeaderColor?.('#fafafa');
+  tg.setBackgroundColor?.('#fafafa');
+  tg.setBottomBarColor?.('#fafafa');
+}
+
 export default function App() {
   const {
     bloodCoins,
@@ -42,6 +57,9 @@ export default function App() {
   // Navigation sheet management states
   const [activeSheet, setActiveSheet] = useState(null); // 'shop' or 'stats' or null
 
+  // Init Telegram fullscreen on mount
+  useEffect(() => { initTelegram(); }, []);
+
   // Track coordinates of the cursor over the bite area
   const handleMouseMove = (e) => {
     if (!canvasRef.current) return;
@@ -53,14 +71,9 @@ export default function App() {
   };
 
   const handleCanvasClick = (e) => {
+    e.preventDefault();
     setHasInteracted(true);
     initAudio();
-
-    // Check if the click target is the Finn image itself, not empty background space
-    if (e.target.tagName !== 'IMG') {
-      return; 
-    }
-
     setIsBiting(true);
     setTimeout(() => setIsBiting(false), 80);
     handleBite(e.clientX, e.clientY, canvasRef);

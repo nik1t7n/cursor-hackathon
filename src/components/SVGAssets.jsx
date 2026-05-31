@@ -141,7 +141,7 @@ export function FinnTarget({ children, onClick, isBiting, biteCount }) {
   return (
     <div 
       className="relative w-full h-full flex items-center justify-center cursor-crosshair overflow-hidden rounded-3xl"
-      onClick={onClick}
+      onPointerDown={onClick}
       style={{
         backgroundColor: "transparent", // Clean borderless layout
         border: "none"

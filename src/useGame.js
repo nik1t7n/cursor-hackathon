@@ -1,5 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 
+// Haptic helper — reads lazily so TG SDK is always available
+function buzz(kind = 'heavy') {
+  const hf = window.Telegram?.WebApp?.HapticFeedback;
+  if (hf) {
+    if (kind === 'success') hf.notificationOccurred('success');
+    else hf.impactOccurred(kind); // 'light'|'medium'|'heavy'|'rigid'|'soft'
+  } else {
+    navigator.vibrate?.(kind === 'heavy' || kind === 'rigid' ? 40 : 15);
+  }
+}
+
 // List of funny floating texts to pop up on bite clicks
 const FLOAT_PHRASES = [
   'SLURP!', 'ITCHY!', 'OOUCH!', 'ANKLE SHOT!', 'DIRECT VEIN!', 
@@ -221,6 +232,7 @@ export function useGame() {
 
   // Handle biting click
   const handleBite = (clientX, clientY, containerRef) => {
+    buzz('heavy');
     initAudio();
     playBiteSound();
 
@@ -273,6 +285,7 @@ export function useGame() {
     const upgrade = upgrades[upIndex];
     if (bloodCoins < upgrade.cost) return;
 
+    buzz('success');
     playUpgradeSound();
 
     const newLevel = upgrade.level + 1;
