@@ -84,6 +84,12 @@ async function poll() {
   while (true) {
     try {
       const data = await call("getUpdates", { offset, timeout: 30, allowed_updates: ["message"] });
+      if (!data.ok) {
+        // 409 Conflict = another instance running; wait and retry
+        console.error("API error:", data.error_code, data.description);
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
       if (data.result?.length) {
         for (const upd of data.result) {
           offset = upd.update_id + 1;

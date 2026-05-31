@@ -10,12 +10,8 @@ export default defineConfig({
     host: true,
     // Allow requests from the Cloudflare tunnel hostname
     allowedHosts: ["dev-mt.mrz.sh", "localhost"],
-    // HMR through tunnel: websocket must use wss on port 443
-    hmr: {
-      host: "dev-mt.mrz.sh",
-      protocol: "wss",
-      clientPort: 443,
-    },
+    // HMR disabled — WSS through Cloudflare tunnel blocks Telegram webview
+    hmr: false,
     // Proxy /api to Express game server
     proxy: {
       "/api": "http://localhost:8080",
