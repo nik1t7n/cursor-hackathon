@@ -1,620 +1,585 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Volume2, VolumeX, Share2, Copy, Sparkles, AlertCircle, ShoppingBag, BarChart3, X } from 'lucide-react';
+import { useGame } from './useGame';
+import { 
+  BloodCoinSVG, 
+  MosquitoSVG, 
+  TouristLegSVG, 
+  FinnTarget 
+} from './components/SVGAssets';
 
-// ── Telegram Mini App helpers ──────────────────────────────────────────────
-// Read lazily — TG SDK sets window.Telegram AFTER the module executes
-function getTG() {
-  return typeof window !== "undefined" ? window.Telegram?.WebApp : null;
-}
-
-function initTelegram() {
-  const tg = getTG();
-  if (!tg) return;
-  tg.ready();
-  tg.expand();
-  if (tg.isVersionAtLeast?.("8.0")) {
-    tg.requestFullscreen?.();
-    tg.disableVerticalSwipes?.();
-  }
-  tg.setHeaderColor?.("#ffd23f");
-  tg.setBackgroundColor?.("#ffd23f");
-  tg.setBottomBarColor?.("#ffd23f");
-}
-
-function buzz(kind = "heavy") {
-  const tg = getTG();
-  const hf = tg?.HapticFeedback;
-  if (hf) {
-    if (kind === "success") hf.notificationOccurred("success");
-    else if (kind === "warning") hf.notificationOccurred("warning");
-    else if (kind === "selection") hf.selectionChanged();
-    // "light"|"medium"|"heavy"|"rigid"|"soft" all valid per Bot API 6.1+
-    else hf.impactOccurred(kind);
-  } else {
-    navigator.vibrate?.(kind === "heavy" || kind === "rigid" ? 40 : 15);
-  }
-}
-
-function getSafeInsets() {
-  const tg = getTG();
-  if (tg?.contentSafeAreaInset) return tg.contentSafeAreaInset;
-  return { top: 0, right: 0, bottom: 0, left: 0 };
-}
-
-// ── WebAudio ───────────────────────────────────────────────────────────────
-let audioCtx = null;
-let droneGain = null;
-let droneStarted = false;
-
-function getAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  return audioCtx;
-}
-
-function startDrone(muted) {
-  if (droneStarted) return;
-  droneStarted = true;
-  const ctx = getAudio();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  const lfo = ctx.createOscillator();
-  const lfoGain = ctx.createGain();
-
-  osc.type = "sawtooth";
-  osc.frequency.value = 320;
-  lfo.frequency.value = 8;
-  lfoGain.gain.value = 18;
-  lfo.connect(lfoGain);
-  lfoGain.connect(osc.frequency);
-
-  gain.gain.value = muted ? 0 : 0.04;
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.start();
-  lfo.start();
-  droneGain = gain;
-}
-
-function setDroneMute(muted) {
-  if (!droneGain) return;
-  droneGain.gain.value = muted ? 0 : 0.04;
-}
-
-function playBite() {
-  if (!audioCtx) return;
-  const ctx = audioCtx;
-  // pop
-  const osc = ctx.createOscillator();
-  const g = ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.value = 900;
-  g.gain.setValueAtTime(0.3, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
-  osc.connect(g); g.connect(ctx.destination);
-  osc.start(); osc.stop(ctx.currentTime + 0.08);
-
-  // slurp noise
-  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const filt = ctx.createBiquadFilter();
-  filt.type = "bandpass"; filt.frequency.value = 1200; filt.Q.value = 0.8;
-  const ng = ctx.createGain();
-  ng.gain.setValueAtTime(0.15, ctx.currentTime);
-  ng.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-  src.connect(filt); filt.connect(ng); ng.connect(ctx.destination);
-  src.start();
-}
-
-function playUpgrade() {
-  if (!audioCtx) return;
-  const ctx = audioCtx;
-  [440, 550, 660].forEach((f, i) => {
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = "square"; o.frequency.value = f;
-    g.gain.setValueAtTime(0, ctx.currentTime + i * 0.06);
-    g.gain.linearRampToValueAtTime(0.2, ctx.currentTime + i * 0.06 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.06 + 0.15);
-    o.connect(g); g.connect(ctx.destination);
-    o.start(ctx.currentTime + i * 0.06);
-    o.stop(ctx.currentTime + i * 0.06 + 0.15);
-  });
-}
-
-// ── Upgrade definitions ────────────────────────────────────────────────────
-const UPGRADES_DEF = [
-  { id: "more_mozzies", name: "More Mosquitoes", emoji: "🦟", baseCost: 50,  kind: "passive", amount: 1 },
-  { id: "louder_buzz",  name: "Louder Buzz",     emoji: "📢", baseCost: 80,  kind: "click",   amount: 2 },
-  { id: "ankle_bite",   name: "Ankle Bite",      emoji: "🦵", baseCost: 200, kind: "click",   amount: 5 },
-  { id: "open_window",  name: "Open Window",     emoji: "🪟", baseCost: 500, kind: "passive", amount: 4 },
-];
-
-const POPUP_MSGS = ["ITCHY! 😤", "ANKLE HIT! 🦵", "DIRECT VEIN! 🩸", "SUMMER RUINED! ☀️💀", "BULL'S-EYE! 🎯", "SWEET BLOOD! 😋"];
-const TARGETS = ["🦵", "🦶", "💪", "😴"];
-
-function upgradeCost(def, owned) {
-  return Math.ceil(def.baseCost * Math.pow(1.5, owned));
-}
-
-function fmt(n) {
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
-  return Math.floor(n).toLocaleString();
-}
-
-// ── Component ──────────────────────────────────────────────────────────────
 export default function App() {
-  const [blood, setBlood] = useState(0);
-  const [totalBites, setTotalBites] = useState(0);
-  const [totalBlood, setTotalBlood] = useState(0);
-  const [upgrades, setUpgrades] = useState(() =>
-    UPGRADES_DEF.map(d => ({ ...d, owned: 0 }))
-  );
-  const [muted, setMuted] = useState(false);
-  const [biteMarks, setBiteMarks] = useState([]);
-  const [floats, setFloats] = useState([]);
-  const [shaking, setShaking] = useState(false);
-  const [popup, setPopup] = useState(null);
-  const [tourist, setTourist] = useState(null);
-  const [touristMsg, setTouristMsg] = useState(null);
-  const [copied, setCopied] = useState(false);
-  const [safeInsets, setSafeInsets] = useState({ top: 0, right: 0, bottom: 0, left: 0 });
-  const [targetIdx] = useState(() => Math.floor(Math.random() * TARGETS.length));
-  const [audioReady, setAudioReady] = useState(false);
+  const {
+    bloodCoins,
+    biteCount,
+    biteMarks,
+    floatingTexts,
+    isMuted,
+    upgrades,
+    bloodPerClick,
+    bloodPerSecond,
+    jakeActive,
+    jakeClicks,
+    jakeClicksNeeded,
+    jakeTimer,
+    rareTarget,
+    eventOutcome,
+    handleBite,
+    buyUpgrade,
+    toggleMute,
+    handleJakeClick,
+    getShareText,
+    initAudio
+  } = useGame();
 
-  const bloodRef = useRef(0);
-  const upgradesRef = useRef(upgrades);
-  const mutedRef = useRef(muted);
-  const touristTimerRef = useRef(null);
-  const touristExpireRef = useRef(null);
-  const popupTimerRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [mousePos, setMousePos] = useState({ x: 150, y: 150 });
+  const [isBiting, setIsBiting] = useState(false);
+  const [showShareToast, setShowShareToast] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+  
+  // Navigation sheet management states
+  const [activeSheet, setActiveSheet] = useState(null); // 'shop' or 'stats' or null
 
-  bloodRef.current = blood;
-  upgradesRef.current = upgrades;
-  mutedRef.current = muted;
-
-  // Init TG + safe insets
-  useEffect(() => {
-    initTelegram();
-    setSafeInsets(getSafeInsets());
-    const _tg = getTG();
-    if (_tg) {
-      _tg.onEvent?.("safeAreaChanged", () => setSafeInsets(getSafeInsets()));
-      _tg.onEvent?.("contentSafeAreaChanged", () => setSafeInsets(getSafeInsets()));
-    }
-  }, []);
-
-  // Passive income tick (100ms)
-  useEffect(() => {
-    const id = setInterval(() => {
-      const bps = upgradesRef.current
-        .filter(u => u.kind === "passive")
-        .reduce((s, u) => s + u.amount * u.owned, 0);
-      if (bps > 0) {
-        const gain = bps / 10;
-        setBlood(b => b + gain);
-        setTotalBlood(t => t + gain);
-      }
-    }, 100);
-    return () => clearInterval(id);
-  }, []);
-
-  // Tourist leg scheduler
-  useEffect(() => {
-    function scheduleNext() {
-      const delay = 25000 + Math.random() * 15000;
-      touristTimerRef.current = setTimeout(() => {
-        setTourist({ deadline: Date.now() + 6000 });
-        touristExpireRef.current = setTimeout(() => {
-          setTourist(t => {
-            if (t) setTouristMsg("The tourist used repellent. 🧴");
-            return null;
-          });
-          setTimeout(() => setTouristMsg(null), 3000);
-          scheduleNext();
-        }, 6000);
-      }, delay);
-    }
-    scheduleNext();
-    return () => {
-      clearTimeout(touristTimerRef.current);
-      clearTimeout(touristExpireRef.current);
-    };
-  }, []);
-
-  const bloodPerClick = upgrades
-    .filter(u => u.kind === "click")
-    .reduce((s, u) => s + u.amount * u.owned, 1);
-
-  const bloodPerSec = upgrades
-    .filter(u => u.kind === "passive")
-    .reduce((s, u) => s + u.amount * u.owned, 0);
-
-  const passiveOwned = upgrades
-    .filter(u => u.kind === "passive")
-    .reduce((s, u) => s + u.owned, 0);
-
-  function ensureAudio() {
-    if (!audioReady) {
-      getAudio().resume();
-      setAudioReady(true);
-    }
-  }
-
-  const handleTap = useCallback((e) => {
-    ensureAudio();
-    if (!droneStarted) startDrone(mutedRef.current);
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clientX = e.touches?.[0]?.clientX ?? e.clientX ?? rect.left + rect.width / 2;
-    const clientY = e.touches?.[0]?.clientY ?? e.clientY ?? rect.top + rect.height / 2;
-    const x = ((clientX - rect.left) / rect.width) * 100;
-    const y = ((clientY - rect.top) / rect.height) * 100;
-
-    const bpc = upgradesRef.current
-      .filter(u => u.kind === "click")
-      .reduce((s, u) => s + u.amount * u.owned, 1);
-
-    setBlood(b => b + bpc);
-    setTotalBlood(t => t + bpc);
-    setTotalBites(t => t + 1);
-
-    // Bite mark
-    const bmId = Date.now() + Math.random();
-    setBiteMarks(m => [...m.slice(-20), { id: bmId, x, y }]);
-
-    // Float
-    const fId = bmId + 1;
-    setFloats(f => [...f, { id: fId, x, y, val: bpc }]);
-    setTimeout(() => setFloats(f => f.filter(i => i.id !== fId)), 900);
-
-    // Screen shake
-    setShaking(true);
-    setTimeout(() => setShaking(false), 150);
-
-    // Popup (20% chance)
-    if (Math.random() < 0.2) {
-      const msg = POPUP_MSGS[Math.floor(Math.random() * POPUP_MSGS.length)];
-      setPopup(msg);
-      clearTimeout(popupTimerRef.current);
-      popupTimerRef.current = setTimeout(() => setPopup(null), 800);
-    }
-
-    playBite();
-    buzz("heavy");
-  }, []);
-
-  function handleTouristTap() {
-    clearTimeout(touristExpireRef.current);
-    setTourist(null);
-    const bonus = Math.ceil(bloodPerClick * 80 + 200);
-    setBlood(b => b + bonus);
-    setTotalBlood(t => t + bonus);
-    setTouristMsg(`You destroyed a vacation! +${fmt(bonus)} 🩸`);
-    setTimeout(() => setTouristMsg(null), 3000);
-    buzz("heavy");
-    playUpgrade();
-    // reschedule
-    const delay = 25000 + Math.random() * 15000;
-    touristTimerRef.current = setTimeout(() => {
-      setTourist({ deadline: Date.now() + 6000 });
-    }, delay);
-  }
-
-  function buyUpgrade(id) {
-    ensureAudio();
-    const idx = upgrades.findIndex(u => u.id === id);
-    if (idx === -1) return;
-    const u = upgrades[idx];
-    const cost = upgradeCost(u, u.owned);
-    if (bloodRef.current < cost) return;
-    setBlood(b => b - cost);
-    setUpgrades(prev => prev.map((u2, i) => i === idx ? { ...u2, owned: u2.owned + 1 } : u2));
-    buzz("success");
-    playUpgrade();
-  }
-
-  function toggleMute() {
-    const next = !muted;
-    setMuted(next);
-    mutedRef.current = next;
-    setDroneMute(next);
-  }
-
-  function copyFlex() {
-    const templates = [
-      `I ruined ${fmt(totalBlood)} summers as a mosquito 🦟`,
-      `I bit ${fmt(totalBites)} ankles today 🦵`,
-      `My mosquito army makes ${fmt(bloodPerSec)} blood/sec 🩸`,
-    ];
-    const text = templates[Math.floor(totalBlood / 100) % templates.length] ||
-      `I ruined ${fmt(totalBlood)} summers as a mosquito 🦟`;
-    navigator.clipboard.writeText(text).catch(() => {
-      const ta = document.createElement("textarea");
-      ta.value = text; document.body.appendChild(ta);
-      ta.select(); document.execCommand("copy"); ta.remove();
+  // Track coordinates of the cursor over the bite area
+  const handleMouseMove = (e) => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    setMousePos({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     });
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  };
 
-    // Post score to server (non-blocking)
-    fetch("/api/score", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        initData: getTG()?.initData || "",
-        score: Math.floor(totalBlood),
-        name: getTG()?.initDataUnsafe?.user?.first_name || "Mosquito",
-      }),
-    }).catch(() => {});
-  }
+  const handleCanvasClick = (e) => {
+    setHasInteracted(true);
+    initAudio();
 
-  const insets = safeInsets;
+    // Check if the click target is the Finn image itself, not empty background space
+    if (e.target.tagName !== 'IMG') {
+      return; 
+    }
+
+    setIsBiting(true);
+    setTimeout(() => setIsBiting(false), 80);
+    handleBite(e.clientX, e.clientY, canvasRef);
+  };
+
+  const handleShareClick = () => {
+    setHasInteracted(true);
+    initAudio();
+    navigator.clipboard.writeText(getShareText());
+    setShowShareToast(true);
+    setTimeout(() => setShowShareToast(false), 2500);
+  };
+
+  // Generate passive pests based on Swarm Level
+  const [ambientMosquitoes, setAmbientMosquitoes] = useState([]);
+  const passiveSwarmLevel = upgrades.find(u => u.id === 'mosquitoes')?.level || 0;
+
+  useEffect(() => {
+    const count = Math.min(20, passiveSwarmLevel * 2);
+    const initialMosquitoes = Array.from({ length: count }).map((_, idx) => ({
+      id: idx,
+      x: Math.random() * 90 + 5,
+      y: Math.random() * 90 + 5,
+      scale: Math.random() * 0.25 + 0.35,
+      angle: Math.random() * 360,
+      speedX: (Math.random() - 0.5) * 1.2,
+      speedY: (Math.random() - 0.5) * 1.2
+    }));
+    setAmbientMosquitoes(initialMosquitoes);
+  }, [passiveSwarmLevel]);
+
+  // Handle movements of passive swarm pests (organic insect flight path simulation)
+  useEffect(() => {
+    if (ambientMosquitoes.length === 0) return;
+
+    const interval = setInterval(() => {
+      setAmbientMosquitoes(prev => 
+        prev.map(m => {
+          // Organic steering force adjustments (random walking)
+          let nSpeedX = m.speedX + (Math.random() - 0.5) * 0.25;
+          let nSpeedY = m.speedY + (Math.random() - 0.5) * 0.25;
+
+          // Limit peak speed to keep flights gentle and readable
+          const maxSpeed = 0.7;
+          const currentSpeed = Math.sqrt(nSpeedX * nSpeedX + nSpeedY * nSpeedY);
+          if (currentSpeed > maxSpeed) {
+            nSpeedX = (nSpeedX / currentSpeed) * maxSpeed;
+            nSpeedY = (nSpeedY / currentSpeed) * maxSpeed;
+          }
+
+          // Gentle sinusoidal hovering wave drift
+          const waveDriftX = Math.sin(Date.now() * 0.003 + m.id) * 0.08;
+          const waveDriftY = Math.cos(Date.now() * 0.003 + m.id) * 0.08;
+
+          let nx = m.x + nSpeedX + waveDriftX;
+          let ny = m.y + nSpeedY + waveDriftY;
+
+          // Keep in bounds with a soft bounce and force push
+          if (nx < 4) { nSpeedX = Math.abs(nSpeedX) * 1.1; nx = 4; }
+          if (nx > 96) { nSpeedX = -Math.abs(nSpeedX) * 1.1; nx = 96; }
+          if (ny < 4) { nSpeedY = Math.abs(nSpeedY) * 1.1; ny = 4; }
+          if (ny > 96) { nSpeedY = -Math.abs(nSpeedY) * 1.1; ny = 96; }
+
+          // Calculate heading angle dynamically to align with flight vector
+          const headingRad = Math.atan2(nSpeedY + waveDriftY, nSpeedX + waveDriftX);
+          const headingDeg = (headingRad * 180) / Math.PI + 90; // +90 offset for vertical facing sprite
+
+          return {
+            ...m,
+            x: nx,
+            y: ny,
+            speedX: nSpeedX,
+            speedY: nSpeedY,
+            angle: headingDeg
+          };
+        })
+      );
+    }, 60);
+
+    return () => clearInterval(interval);
+  }, [ambientMosquitoes.length]);
+
+
+
+  const getPestRank = () => {
+    if (biteCount < 10) return 'Larva Recruit';
+    if (biteCount < 50) return 'Ankle Biter';
+    if (biteCount < 150) return 'Tent Invader';
+    if (biteCount < 400) return 'Vacation Ruiner';
+    return 'Swarm Lord';
+  };
 
   return (
-    <div style={{ ...S.app, paddingTop: Math.max(insets.top, 12), paddingBottom: Math.max(insets.bottom, 12), transform: shaking ? `translate(${(Math.random()-0.5)*6}px, ${(Math.random()-0.5)*6}px)` : "none" }}>
+    <div className="relative w-full h-full flex flex-col items-center justify-between bg-[#fafafa] overflow-hidden select-none font-sans text-zinc-900 p-4 box-border">
+      
 
-      {/* Header */}
-      <div style={S.header}>
-        <span style={S.title}>🦟 Mosquito Tycoon</span>
-        <button style={S.muteBtn} onPointerDown={toggleMute}>{muted ? "🔇" : "🔊"}</button>
-      </div>
 
-      {/* Blood counter */}
-      <div style={S.bloodCounter}>
-        <span style={S.bloodNum}>{fmt(blood)}</span>
-        <span style={S.bloodLabel}> 🩸 blood coins</span>
-        {bloodPerSec > 0 && <div style={S.bps}>+{fmt(bloodPerSec)}/sec</div>}
-      </div>
-
-      {/* Main tap target */}
-      <div style={S.targetWrap}
-        onPointerDown={handleTap}
-      >
-        {/* Bite marks */}
-        {biteMarks.map(m => (
-          <div key={m.id} style={{ ...S.biteMark, left: `${m.x}%`, top: `${m.y}%` }} />
-        ))}
-
-        {/* Float +N */}
-        {floats.map(f => (
-          <div key={f.id} style={{ ...S.float, left: `${f.x}%`, top: `${f.y}%` }}>
-            +{f.val}
-          </div>
-        ))}
-
-        {/* Main emoji */}
-        <div style={S.mainTarget}>{TARGETS[targetIdx]}</div>
-        <div style={S.mainMosquito}>🦟</div>
-
-        {/* Popup */}
-        {popup && <div style={S.popup}>{popup}</div>}
-      </div>
-
-      {/* Mini mosquito army */}
-      {passiveOwned > 0 && (
-        <div style={S.armyRow}>
-          {Array.from({ length: Math.min(passiveOwned * 2, 8) }).map((_, i) => (
-            <span key={i} style={{ ...S.armyBug, animationDelay: `${i * 0.3}s` }}>🦟</span>
-          ))}
+      {/* --- Elegant Top Title & Counter Header --- */}
+      <header className="w-full max-w-lg flex items-center justify-between z-10 border-b border-[#18181b]/10 pb-3">
+        <div>
+          <h1 className="text-lg font-black tracking-widest text-[#18181b] uppercase flex items-center gap-1.5 select-none">
+            MOSQUITO TYCOON
+          </h1>
+          <p className="text-[10px] uppercase font-bold text-zinc-500 mt-0.5 tracking-wider">
+            Summer Slacking Simulator
+          </p>
         </div>
-      )}
 
-      {/* Tourist leg event */}
-      {tourist && (
-        <button style={S.touristBtn} onPointerDown={handleTouristTap}>
-          <div style={S.touristInner}>
-            <div style={{ fontSize: 56 }}>🦵🩴</div>
-            <div style={S.touristLabel}>TOURIST LEG! TAP FAST!</div>
+        {/* Currency drop and total count */}
+        <div className="flex items-center gap-2.5">
+          <div className="text-right">
+            <div className="text-lg font-black text-[#e11d48] tracking-tight flex items-center gap-1">
+              <span>{bloodCoins.toLocaleString()}</span>
+              <BloodCoinSVG className="w-5 h-5 filter drop-shadow" />
+            </div>
+            <p className="text-[9px] uppercase font-bold text-zinc-400">
+              +{bloodPerSecond.toFixed(1)}/s
+            </p>
           </div>
-        </button>
-      )}
+        </div>
+      </header>
 
-      {touristMsg && <div style={S.touristMsg}>{touristMsg}</div>}
+      {/* --- Center Arena: The Click Target --- */}
+      <main className="w-full max-w-lg flex-grow flex items-center justify-center py-4 box-border relative overflow-hidden">
+        <div 
+          ref={canvasRef}
+          onMouseMove={handleMouseMove}
+          className="w-full h-full max-h-[500px] relative select-none group bg-transparent"
+        >
+          <FinnTarget onClick={handleCanvasClick} isBiting={isBiting} biteCount={biteCount}>
+            <>
+              {/* Glowing Bite Spot Marks */}
+              <AnimatePresence>
+                {biteMarks.map(mark => (
+                  <motion.div
+                    key={mark.id}
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: mark.opacity }}
+                    exit={{ opacity: 0 }}
+                    className="absolute rounded-full pointer-events-none bg-[#e11d48]/40 ring-2 ring-[#e11d48]/20 blur-[1px] border border-[#e11d48]/70"
+                    style={{
+                      left: `calc(${mark.x}% - ${mark.size / 2}px)`,
+                      top: `calc(${mark.y}% - ${mark.size / 2}px)`,
+                      width: mark.size,
+                      height: mark.size,
+                    }}
+                  >
+                    <div className="w-1 h-1 rounded-full bg-[#9f1239] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
 
-      {/* Upgrades */}
-      <div style={S.upgradesWrap}>
-        <div style={S.upgradesLabel}>UPGRADES</div>
-        <div style={S.upgradesRow}>
-          {upgrades.map(u => {
-            const cost = upgradeCost(u, u.owned);
-            const canBuy = blood >= cost;
-            return (
-              <button
-                key={u.id}
-                style={{ ...S.upgradeBtn, opacity: canBuy ? 1 : 0.45 }}
-                onPointerDown={() => buyUpgrade(u.id)}
-                disabled={!canBuy}
+              {/* Floating Action Text Popups */}
+              <AnimatePresence>
+                {floatingTexts.map(item => (
+                  <motion.div
+                    key={item.id}
+                    initial={{ scale: 0.5, y: item.y, opacity: 0, rotate: Math.random() * 20 - 10 }}
+                    animate={{ scale: 1.1, y: item.y - 65, opacity: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.7, ease: "easeOut" }}
+                    className="absolute pointer-events-none text-center select-none z-30"
+                    style={{ left: `${item.x}%`, transform: 'translateX(-50%)' }}
+                  >
+                    <span className="block px-2.5 py-0.5 text-[10px] bg-[#18181b] border border-[#18181b] rounded text-white font-black tracking-widest uppercase">
+                      {item.text}
+                    </span>
+                    <span className="block text-[10px] font-black text-[#e11d48] mt-0.5">
+                      +{item.amount} BLOOD
+                    </span>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+
+              {/* Ambient pests fluttering */}
+              {ambientMosquitoes.map(m => (
+                <div
+                  key={m.id}
+                  className="absolute pointer-events-none z-10 transition-transform duration-100"
+                  style={{
+                    left: `${m.x}%`,
+                    top: `${m.y}%`,
+                    transform: `translate(-50%, -50%) scale(${m.scale}) rotate(${m.angle}deg)`
+                  }}
+                >
+                  <img 
+                    src="/mosq.webp" 
+                    alt="Pixel Mosquito Swarm" 
+                    className="w-8 h-8 object-contain opacity-70 select-none"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                </div>
+              ))}
+
+              {/* Spring Desktop Mosquito cursor follower */}
+              <div
+                className="absolute pointer-events-none z-40 hidden md:block transition-all ease-out duration-75"
+                style={{
+                  left: mousePos.x,
+                  top: mousePos.y,
+                  transform: `translate(-50%, -50%) scale(${isBiting ? 1.25 : 0.95}) rotate(${isBiting ? 12 : -8}deg)`,
+                  filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.12))'
+                }}
               >
-                <div style={S.upgradeEmoji}>{u.emoji}</div>
-                <div style={S.upgradeName}>{u.name}</div>
-                <div style={S.upgradeCost}>🩸 {fmt(cost)}</div>
-                {u.owned > 0 && <div style={S.ownedBadge}>x{u.owned}</div>}
-              </button>
-            );
-          })}
+                <img 
+                  src="/mosq.webp" 
+                  alt="Active Mosquito Follower" 
+                  className="w-12 h-12 object-contain select-none"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              </div>
+            </>
+          </FinnTarget>
+
+          {/* --- RARE EVENT OVERLAY: Pixel Art Jake detected --- */}
+          <AnimatePresence>
+            {jakeActive && (
+              <motion.div
+                initial={{ x: "120%", y: "-50%", rotate: 25, scale: 0.7 }}
+                animate={{ x: "15%", y: "-50%", rotate: -15, scale: 0.8 }} // Peeks in at 80% size, slightly rotated
+                exit={{ x: "120%", y: "-50%", rotate: 25, scale: 0.7 }}
+                transition={{ type: "spring", stiffness: 220, damping: 19 }}
+                className="absolute right-0 top-1/2 -translate-y-1/2 z-40 select-none cursor-pointer flex flex-col items-center justify-center gap-1.5"
+                style={{ originX: 1, originY: 0.5 }}
+                onClick={(e) => {
+                  e.stopPropagation(); // Avoid triggering Finn target clicks
+                  handleJakeClick(e.clientX, e.clientY, canvasRef);
+                }}
+              >
+                {/* Timer countdown ticker Float over Jake */}
+                {!eventOutcome && (
+                  <div className="bg-[#18181b] text-white px-2.5 py-0.5 rounded-lg border border-[#18181b] font-mono text-[9px] font-black uppercase tracking-widest animate-pulse shadow-md z-50">
+                    ⏱️ {jakeTimer}s
+                  </div>
+                )}
+
+                {/* Jake Pixel Art Sprite */}
+                <div className="relative group active:scale-95 transition-transform">
+                  <img 
+                    src={rareTarget === 'jake' ? '/jake.png' : '/she.png'} 
+                    alt={rareTarget === 'jake' ? "Jake the Dog pixel art" : "Adventure Time character pixel art"} 
+                    className="w-40 h-40 md:w-48 md:h-48 object-contain filter drop-shadow(0 10px 20px rgba(0,0,0,0.18))"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+
+                  {/* Tap prompt dashed spinner */}
+                  {!eventOutcome && (
+                    <div className="absolute inset-0 border-3 border-dashed border-amber-500 rounded-full animate-spin pointer-events-none opacity-40" />
+                  )}
+                </div>
+
+                {/* Taps Progress Bar */}
+                {!eventOutcome && (
+                  <div className="w-24 bg-zinc-200 h-2.5 rounded-full p-0.5 border border-[#18181b] overflow-hidden relative shadow-inner shadow-black/10 z-50">
+                    <motion.div 
+                      className="bg-amber-500 h-full rounded-full"
+                      style={{ width: `${(jakeClicks / jakeClicksNeeded) * 100}%` }}
+                      transition={{ ease: "easeOut" }}
+                    />
+                  </div>
+                )}
+
+                {/* Success outcome pop */}
+                {eventOutcome === 'ruined' && (
+                  <motion.div 
+                    initial={{ scale: 0 }} 
+                    animate={{ scale: 1 }} 
+                    className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/95 rounded-3xl p-3 border border-[#18181b] shadow-xl z-50"
+                  >
+                    <span className="text-3xl animate-bounce">🩸</span>
+                    <h3 className="text-xs font-black bg-[#18181b] text-yellow-400 px-2 py-1 rounded-lg uppercase tracking-wider mt-1">
+                      DRAINED!
+                    </h3>
+                  </motion.div>
+                )}
+
+                {eventOutcome === 'escaped' && (
+                  <motion.div 
+                    initial={{ scale: 0 }} 
+                    animate={{ scale: 1 }} 
+                    className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/95 rounded-3xl p-3 border border-rose-500 shadow-xl z-50"
+                  >
+                    <span className="text-3xl">💨</span>
+                    <h3 className="text-xs font-black bg-[#18181b] text-rose-500 px-2 py-1 rounded-lg uppercase tracking-wider mt-1">
+                      ESCAPED!
+                    </h3>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
-      </div>
+      </main>
 
-      {/* Share */}
-      <button style={S.shareBtn} onPointerDown={copyFlex}>
-        {copied ? "✅ Copied!" : "📋 Copy Flex"}
-      </button>
+      {/* --- Elegant Floating Bottom Dock Navigation Menu --- */}
+      <footer className="w-full max-w-lg z-30 mb-2">
+        <div className="minimal-dock rounded-3xl p-2.5 flex items-center justify-between gap-2 max-w-sm mx-auto">
+          
+          {/* Main Bite Screen Toggle Tab */}
+          <button
+            onClick={() => { initAudio(); setActiveSheet(null); }}
+            className={`flex-1 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider active-hover-scale flex items-center justify-center gap-1 ${
+              activeSheet === null 
+                ? 'bg-[#18181b] text-white border border-[#18181b]' 
+                : 'text-zinc-600 border border-transparent'
+            }`}
+          >
+            <span>🎯 BITE</span>
+          </button>
 
-      <style>{`
-        @keyframes floatUp { 0%{opacity:1;transform:translateY(0) scale(1)} 100%{opacity:0;transform:translateY(-60px) scale(1.3)} }
-        @keyframes buzzDrift { 0%,100%{transform:translateX(0)} 50%{transform:translateX(8px)} }
-        @keyframes touristPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
-      `}</style>
+          {/* Shop Bottom Sheet Toggle Tab */}
+          <button
+            onClick={() => { initAudio(); setActiveSheet('shop'); }}
+            className={`flex-1 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider active-hover-scale flex items-center justify-center gap-1 ${
+              activeSheet === 'shop' 
+                ? 'bg-[#18181b] text-white border border-[#18181b]' 
+                : 'text-zinc-600 border border-transparent hover:bg-zinc-100/50'
+            }`}
+          >
+            <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+            <span>SHOP</span>
+          </button>
+
+          {/* Stats Bottom Sheet Toggle Tab */}
+          <button
+            onClick={() => { initAudio(); setActiveSheet('stats'); }}
+            className={`flex-1 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider active-hover-scale flex items-center justify-center gap-1 ${
+              activeSheet === 'stats' 
+                ? 'bg-[#18181b] text-white border border-[#18181b]' 
+                : 'text-zinc-600 border border-transparent hover:bg-zinc-100/50'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+            <span>STATS</span>
+          </button>
+
+          {/* Vertical Separator */}
+          <div className="w-[1.5px] h-6 bg-[#18181b]/10 self-center" />
+
+          {/* Sound Toggle Action Tab */}
+          <button
+            onClick={toggleMute}
+            className={`p-2.5 rounded-2xl transition-all active-hover-scale ${
+              isMuted 
+                ? 'bg-rose-50 text-rose-600 border border-rose-200' 
+                : 'bg-zinc-100 text-sky-600 border border-zinc-200 hover:bg-zinc-200/50'
+            }`}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+
+        </div>
+      </footer>
+
+      {/* --- SLIDING BOTTOM SHEETS (Framer Motion) --- */}
+      <AnimatePresence>
+        {activeSheet && (
+          <>
+            {/* Sheet Backdrop dim blur */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setActiveSheet(null)}
+              className="fixed inset-0 bg-[#18181b]/30 backdrop-blur-[4px] z-40 cursor-pointer"
+            />
+
+            {/* Bottom Sheet Modal Panel */}
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 300, damping: 28 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bottom-sheet max-h-[85vh] flex flex-col max-w-lg mx-auto rounded-t-[32px] overflow-hidden"
+            >
+              {/* Grab handle indicator */}
+              <div className="w-12 h-1.5 bg-zinc-200 rounded-full mx-auto my-3" />
+
+              {/* Sheet Header block */}
+              <div className="px-6 pb-4 border-b border-zinc-100 flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-black uppercase tracking-wider text-[#18181b] flex items-center gap-1.5">
+                    {activeSheet === 'shop' ? <ShoppingBag className="w-4.5 h-4.5 text-rose-600" /> : <BarChart3 className="w-4.5 h-4.5 text-rose-600" />}
+                    <span>{activeSheet === 'shop' ? 'Tactical Swarm Shop' : 'Summer Ruin Stats'}</span>
+                  </h2>
+                  <p className="text-[10px] uppercase font-bold text-zinc-400 mt-0.5">
+                    {activeSheet === 'shop' ? 'Upgrades & Equipment' : 'Pest ranking & achievements'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveSheet(null)}
+                  className="p-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-500 rounded-full transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Sheet Content Inner Scrollable container */}
+              <div className="flex-grow overflow-y-auto px-6 py-4 box-border pb-16">
+                
+                {/* --- Tab 1 Content: Swarm Upgrades Shop --- */}
+                {activeSheet === 'shop' && (
+                  <div className="flex flex-col gap-3">
+                    {upgrades.map(upgrade => {
+                      const isAffordable = bloodCoins >= upgrade.cost;
+                      return (
+                        <button
+                          key={upgrade.id}
+                          onClick={() => buyUpgrade(upgrade.id)}
+                          className={`w-full text-left rounded-2xl p-3 border-2 flex items-center justify-between relative transition-all active-hover-scale ${
+                            isAffordable
+                              ? 'bg-white border-[#18181b] shadow-[4px_4px_0px_#18181b] hover:bg-rose-50/20 cursor-pointer'
+                              : 'bg-zinc-50 border-zinc-200 opacity-60 cursor-not-allowed'
+                          }`}
+                          disabled={!isAffordable}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl bg-zinc-100 p-2 rounded-xl border border-zinc-200">
+                              {upgrade.icon}
+                            </span>
+                            <div>
+                              <h3 className="font-extrabold text-zinc-900 text-xs uppercase tracking-wider">
+                                {upgrade.name}
+                              </h3>
+                              <p className="text-[10px] text-zinc-500 mt-0.5 leading-snug max-w-[200px] md:max-w-none">
+                                {upgrade.desc}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[8px] uppercase font-black text-zinc-400 bg-zinc-100 px-1 py-0.5 rounded border border-zinc-200">
+                                  LVL {upgrade.level}
+                                </span>
+                                <span className="text-[9px] font-black text-[#e11d48]">
+                                  {upgrade.cps > 0 && `+${upgrade.cps} cps`}
+                                  {upgrade.cpc > 0 && `+${upgrade.cpc} cpc`}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end">
+                            <div className="flex items-center gap-0.5 font-mono font-black text-xs text-[#e11d48]">
+                              <BloodCoinSVG className="w-4 h-4" />
+                              <span>{upgrade.cost.toLocaleString()}</span>
+                            </div>
+                            <span className={`text-[8px] uppercase font-black mt-1 px-1.5 py-0.5 rounded border ${
+                              isAffordable ? 'bg-[#18181b] text-white border-[#18181b]' : 'bg-zinc-100 text-zinc-400 border-zinc-200'
+                            }`}>
+                              {isAffordable ? 'BUY' : 'LOCKED'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* --- Tab 2 Content: Stats & Target Picker --- */}
+                {activeSheet === 'stats' && (
+                  <div className="flex flex-col gap-6">
+                    {/* General metrics grid */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-zinc-50 border border-zinc-200 p-3 rounded-2xl">
+                        <span className="text-[10px] uppercase font-black text-zinc-400">Total bites logged</span>
+                        <p className="text-xl font-black text-zinc-900 mt-0.5">{biteCount.toLocaleString()}</p>
+                      </div>
+                      <div className="bg-zinc-50 border border-zinc-200 p-3 rounded-2xl">
+                        <span className="text-[10px] uppercase font-black text-zinc-400">Pest class rank</span>
+                        <p className="text-sm font-black text-[#e11d48] uppercase tracking-wide mt-1.5">{getPestRank()}</p>
+                      </div>
+                      <div className="bg-zinc-50 border border-zinc-200 p-3 rounded-2xl">
+                        <span className="text-[10px] uppercase font-black text-zinc-400">Passive CPS Rate</span>
+                        <p className="text-xl font-black text-zinc-900 mt-0.5">+{bloodPerSecond.toFixed(1)}</p>
+                      </div>
+                      <div className="bg-zinc-50 border border-zinc-200 p-3 rounded-2xl">
+                        <span className="text-[10px] uppercase font-black text-zinc-400">TapCPC Strength</span>
+                        <p className="text-xl font-black text-zinc-900 mt-0.5">+{bloodPerClick}</p>
+                      </div>
+                    </div>
+
+                    {/* Share Button card */}
+                    <button
+                      onClick={handleShareClick}
+                      className="w-full py-4 bg-gradient-to-r from-rose-600 to-[#e11d48] text-white rounded-2xl font-black text-xs tracking-widest shadow-md hover:brightness-110 active-hover-scale flex items-center justify-center gap-2 uppercase border border-rose-500"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>COPY SHARING FLEX CARD</span>
+                    </button>
+                  </div>
+                )}
+
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* --- Flex Clipboard copy Success toast --- */}
+      <AnimatePresence>
+        {showShareToast && (
+          <motion.div
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            className="fixed bottom-24 left-4 right-4 md:left-auto md:right-4 md:w-80 z-50 gallery-panel bg-white border-[#18181b] text-zinc-950 rounded-2xl p-4 flex items-center gap-3 shadow-xl justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-zinc-100 border border-zinc-200">
+                <Copy className="w-4 h-4 text-rose-600" />
+              </div>
+              <div>
+                <p className="font-black text-xs text-zinc-900 uppercase">FLEX COPY SUCCESSFUL!</p>
+                <p className="text-[9px] uppercase font-bold text-zinc-400 mt-0.5">Ready to share on Twitter/Reddit</p>
+              </div>
+            </div>
+            <Sparkles className="w-4 h-4 text-[#e11d48] animate-spin" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
-
-const S = {
-  app: {
-    minHeight: "100dvh",
-    background: "linear-gradient(160deg, #ffd23f 0%, #ffb347 60%, #ff8c42 100%)",
-    fontFamily: "'Segoe UI', system-ui, sans-serif",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    paddingLeft: 16,
-    paddingRight: 16,
-    overflowX: "hidden",
-    transition: "transform 0.05s",
-    userSelect: "none",
-    WebkitUserSelect: "none",
-  },
-  header: {
-    width: "100%",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  title: { fontSize: 20, fontWeight: 900, color: "#7d2d00", letterSpacing: -0.5 },
-  muteBtn: {
-    background: "rgba(255,255,255,0.35)",
-    border: "none",
-    borderRadius: 20,
-    fontSize: 22,
-    padding: "4px 10px",
-    cursor: "pointer",
-    touchAction: "manipulation",
-  },
-  bloodCounter: { textAlign: "center", marginBottom: 12 },
-  bloodNum: { fontSize: 48, fontWeight: 900, color: "#c0020a", textShadow: "0 2px 8px rgba(192,2,10,0.3)" },
-  bloodLabel: { fontSize: 18, color: "#7d2d00", fontWeight: 700 },
-  bps: { fontSize: 14, color: "#a03d00", marginTop: 2 },
-  targetWrap: {
-    position: "relative",
-    width: "min(320px, 88vw)",
-    height: "min(320px, 88vw)",
-    borderRadius: "50%",
-    background: "radial-gradient(circle, #ffe0a3 40%, #ffb347 100%)",
-    boxShadow: "0 8px 32px rgba(200,80,0,0.25), inset 0 0 20px rgba(255,200,100,0.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-    touchAction: "manipulation",
-    userSelect: "none",
-    WebkitUserSelect: "none",
-    marginBottom: 12,
-    overflow: "hidden",
-  },
-  mainTarget: { fontSize: 100, filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.2))", pointerEvents: "none" },
-  mainMosquito: { position: "absolute", top: "20%", right: "22%", fontSize: 36, pointerEvents: "none", animation: "buzzDrift 0.4s infinite" },
-  biteMark: {
-    position: "absolute",
-    width: 14,
-    height: 14,
-    borderRadius: "50%",
-    background: "radial-gradient(circle, #e00 0%, #900 100%)",
-    transform: "translate(-50%, -50%)",
-    opacity: 0.8,
-    pointerEvents: "none",
-  },
-  float: {
-    position: "absolute",
-    transform: "translate(-50%, -50%)",
-    color: "#c0020a",
-    fontWeight: 900,
-    fontSize: 20,
-    pointerEvents: "none",
-    animation: "floatUp 0.9s ease-out forwards",
-    textShadow: "0 1px 4px rgba(255,255,255,0.8)",
-  },
-  popup: {
-    position: "absolute",
-    bottom: "10%",
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: "rgba(192,2,10,0.9)",
-    color: "#fff",
-    padding: "6px 16px",
-    borderRadius: 20,
-    fontWeight: 900,
-    fontSize: 15,
-    whiteSpace: "nowrap",
-    pointerEvents: "none",
-  },
-  armyRow: { display: "flex", gap: 4, marginBottom: 8, flexWrap: "wrap", justifyContent: "center", maxWidth: 320 },
-  armyBug: { fontSize: 20, animation: "buzzDrift 0.6s infinite alternate" },
-  touristBtn: {
-    position: "fixed",
-    bottom: 120,
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: "rgba(255,220,80,0.95)",
-    border: "3px solid #c0020a",
-    borderRadius: 20,
-    padding: "12px 24px",
-    cursor: "pointer",
-    touchAction: "manipulation",
-    zIndex: 100,
-    animation: "touristPulse 0.5s infinite",
-    boxShadow: "0 4px 24px rgba(192,2,10,0.4)",
-  },
-  touristInner: { textAlign: "center" },
-  touristLabel: { fontWeight: 900, fontSize: 16, color: "#c0020a", marginTop: 4 },
-  touristMsg: {
-    position: "fixed",
-    top: "40%",
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: "rgba(192,2,10,0.92)",
-    color: "#fff",
-    padding: "14px 24px",
-    borderRadius: 20,
-    fontWeight: 900,
-    fontSize: 18,
-    zIndex: 200,
-    textAlign: "center",
-    maxWidth: "80vw",
-  },
-  upgradesWrap: { width: "100%", maxWidth: 400, marginBottom: 12 },
-  upgradesLabel: { fontSize: 12, fontWeight: 900, color: "#7d2d00", letterSpacing: 2, marginBottom: 6, textAlign: "center" },
-  upgradesRow: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 },
-  upgradeBtn: {
-    flex: "0 0 auto",
-    background: "rgba(255,255,255,0.7)",
-    border: "2px solid rgba(192,2,10,0.4)",
-    borderRadius: 16,
-    padding: "10px 14px",
-    cursor: "pointer",
-    touchAction: "manipulation",
-    textAlign: "center",
-    minWidth: 80,
-    position: "relative",
-  },
-  upgradeEmoji: { fontSize: 28 },
-  upgradeName: { fontSize: 11, fontWeight: 700, color: "#5a1a00", marginTop: 2 },
-  upgradeCost: { fontSize: 12, fontWeight: 900, color: "#c0020a", marginTop: 2 },
-  ownedBadge: {
-    position: "absolute",
-    top: -6,
-    right: -6,
-    background: "#c0020a",
-    color: "#fff",
-    borderRadius: 10,
-    fontSize: 11,
-    fontWeight: 900,
-    padding: "1px 5px",
-  },
-  shareBtn: {
-    background: "#c0020a",
-    color: "#fff",
-    border: "none",
-    borderRadius: 20,
-    padding: "12px 32px",
-    fontSize: 16,
-    fontWeight: 900,
-    cursor: "pointer",
-    touchAction: "manipulation",
-    marginBottom: 16,
-    boxShadow: "0 4px 16px rgba(192,2,10,0.35)",
-  },
-};
